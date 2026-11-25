@@ -12,7 +12,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 env:
   PLUGIN_FILES: "anysharik_cloud/dist/anysharik-*-py3-none-any.whl"
@@ -160,3 +160,41 @@ jobs:
             exit 1
           fi
           jq -c --arg status "$status" '{status: $status, version, level: .security.level}' response.json
+
+      - name: Create GitHub release and clean up old tags/releases
+        if: github.event_name == 'push' && steps.version.outputs.should_publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          tag="v${version}"
+          changelog="$(jq -r '.head_commit.message // ""' "$GITHUB_EVENT_PATH" | head -c 4000)"
+          if [[ -z "$changelog" ]]; then
+            changelog="Release ${tag}"
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes
+          fi
+          git push origin --delete "$tag" >/dev/null 2>&1 || true
+
+          shopt -s nullglob
+          wheels=($PLUGIN_FILES)
+          gh release create "$tag" "${wheels[@]}" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --notes "$changelog"
+
+          while IFS= read -r old_tag; do
+            if [[ -n "$old_tag" && "$old_tag" != "$tag" ]]; then
+              gh release delete "$old_tag" --yes --cleanup-tag || true
+            fi
+          done < <(gh release list --limit 100 --json tagName -q '.[].tagName')
+
+          while IFS= read -r old_tag; do
+            if [[ -n "$old_tag" && "$old_tag" != "$tag" ]]; then
+              git push origin --delete "$old_tag" || true
+            fi
+          done < <(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}$')
