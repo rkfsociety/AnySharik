@@ -7,7 +7,7 @@
 # name = "AnySharik"
 # description = "Anycubic Cloud printer control, printing and telemetry"
 # author = "AnySharik"
-# version = "0.3.25"
+# version = "0.3.26"
 # ///
 from __future__ import annotations
 
@@ -2859,7 +2859,7 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
         return "AnySharik printer agent"
 
     def get_agent_info(self):
-        return orca.printer_agent.AgentInfo(AGENT_ID, "AnySharik", "0.3.25", "Anycubic Cloud")
+        return orca.printer_agent.AgentInfo(AGENT_ID, "AnySharik", "0.3.26", "Anycubic Cloud")
 
     def _cb(self, name, fn):
         self.callbacks[name] = fn
@@ -2876,6 +2876,8 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
     def set_queue_on_main_fn(self, fn): return self._cb("queue", fn)
 
     def start_discovery(self, start, sending):
+        if not start:
+            return True
         try:
             self.refresh()
         except CloudError:
@@ -2934,7 +2936,9 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
                     "dev_name": p.get("name", "Anycubic"),
                     "dev_id": str(p.get("id", 0)),
                     "dev_ip": "",
-                    "connect_type": "cloud",
+                    "dev_type": str(p.get("model") or p.get("machine_type") or ""),
+                    "dev_signal": "-50",
+                    "connect_type": "lan",
                     "bind_state": "free",
                 }))
         return self.printers
@@ -3058,7 +3062,7 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
             if page:
                 page.post_message({"message": str(exc), "error": True})
 
-    def _send_print(self, params, update_fn, cancel_fn):
+    def _send_print(self, params, update_fn, cancel_fn, start=True):
         state = load_state()
         if not state.get("token"):
             return -7002
@@ -3077,7 +3081,7 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
             CloudApi(state["token"]).upload_and_print(
                 printer_id,
                 path,
-                True,
+                start,
                 lambda p, m: update_fn(1, p, m) if update_fn else None,
             )
             return 0
@@ -3099,7 +3103,7 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
         return -7010
 
     def start_send_gcode_to_sdcard(self, params, update_fn, cancel_fn, wait_fn):
-        return -7010
+        return self._send_print(params, update_fn, cancel_fn, start=False)
 
     def start_print(self, params, update_fn, cancel_fn, wait_fn):
         return self._send_print(params, update_fn, cancel_fn)
