@@ -4,10 +4,10 @@
 #
 # [tool.orcaslicer.plugin]
 # id = "anysharik_cloud"
-# name = "AnySharik Cloud"
+# name = "AnySharik"
 # description = "Anycubic Cloud printer control, printing and telemetry"
 # author = "AnySharik"
-# version = "0.3.17"
+# version = "0.3.18"
 # ///
 from __future__ import annotations
 
@@ -107,11 +107,11 @@ def _login_browser():
     if not browser:
         raise CloudError("Install Microsoft Edge or Google Chrome to sign in")
     port = 19223
-    with socket.socket() as probe:
-        try:
-            probe.bind(("127.0.0.1", port))
-        except OSError as exc:
-            raise CloudError("Local sign-in port is already in use; close other login windows and retry") from exc
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+            raise CloudError("Local sign-in port is already in use; close other login windows and retry")
+    except OSError:
+        pass
     profile = LOGIN_PROFILE_DIR
     _remove_tree(profile, retries=3, delay=0.1)
     profile.mkdir(parents=True, exist_ok=True)
@@ -2814,7 +2814,7 @@ setInterval(() => {
 
 class CloudPage(orca.pages.PagesPluginCapabilityBase):
     def get_name(self):
-        return "AnySharik Cloud"
+        return "AnySharik"
 
     def get_ui(self):
         return PAGE
@@ -2856,10 +2856,10 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
         self._page = None
 
     def get_name(self):
-        return "AnySharik Cloud printer agent"
+        return "AnySharik printer agent"
 
     def get_agent_info(self):
-        return orca.printer_agent.AgentInfo(AGENT_ID, "AnySharik Cloud", "0.3.17", "Anycubic Cloud")
+        return orca.printer_agent.AgentInfo(AGENT_ID, "AnySharik", "0.3.18", "Anycubic Cloud")
 
     def _cb(self, name, fn):
         self.callbacks[name] = fn

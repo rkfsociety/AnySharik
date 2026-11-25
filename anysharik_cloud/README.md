@@ -1,10 +1,10 @@
-# AnySharik Cloud
+# AnySharik
 
 Плагин OrcaSlicer для управления 3D-принтерами Anycubic и печати напрямую через **Anycubic Cloud**.
 
 ## Возможности
 
-- отдельная вкладка **AnySharik Cloud** в стиле Workbench (`Current Print`, `Control`, `About Device`, `Materials`, `Details`, `Firmware info`);
+- отдельная вкладка **AnySharik** в стиле Workbench (`Current Print`, `Control`, `About Device`, `Materials`, `Details`, `Firmware info`);
 - официальный вход в Anycubic Cloud в отдельном временном окне браузера без сохранения пароля;
 - поддержка нескольких принтеров, **ACE Pro** (слоты, цвета, температура, статус сушки) и внешней катушки;
 - отправка нарезанного G-code / `.3mf` из **Printer Agent** (`anysharik_cloud`);
@@ -13,10 +13,10 @@
 
 ## Настройка после установки
 
-1. В `File -> Plugins` включите **AnySharik Cloud** и capability **`AnySharik Cloud printer agent`**, затем перезапустите OrcaSlicer.
+1. В `File -> Plugins` включите **AnySharik** и capability **`AnySharik printer agent`**, затем перезапустите OrcaSlicer.
 2. В настройках OrcaSlicer включите **`Use printer agents instead of print hosts`**.
-3. Откройте вкладку **AnySharik Cloud**, нажмите **Sign in** и войдите на официальной странице Anycubic Cloud (требуется Microsoft Edge, Google Chrome или совместимый Chromium).
-4. В профиле принтера (`Basic information -> Advanced`) выберите **Printer Agent**: **`AnySharik Cloud printer agent`** (ID: `anysharik_cloud`) и перезапустите OrcaSlicer.
+3. Откройте вкладку **AnySharik**, нажмите **Sign in** и войдите на официальной странице Anycubic Cloud (требуется Microsoft Edge, Google Chrome или совместимый Chromium).
+4. В профиле принтера (`Basic information -> Advanced`) выберите **Printer Agent**: **`AnySharik printer agent`** (ID: `anysharik_cloud`) и перезапустите OrcaSlicer.
 
 ## Ограничения
 

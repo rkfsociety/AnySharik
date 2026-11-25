@@ -1,10 +1,10 @@
-# AnySharik Cloud
+# AnySharik
 
 Плагин для **OrcaSlicer**, добавляющий управление 3D-принтерами Anycubic и печать напрямую через **Anycubic Cloud** без локального LAN-подключения.
 
 ## Возможности
 
-- **Вкладка `AnySharik Cloud` в стиле Workbench:**
+- **Вкладка `AnySharik` в стиле Workbench:**
   - список облачных принтеров аккаунта со статусом `Online` / `Offline`;
   - управление активной печатью (`Pause`, `Resume`, `Stop`) с прогрессом и именем задания;
   - мониторинг температур сопла и стола, автоопрос статуса каждые 5 секунд и TLS MQTT-телеметрия;
@@ -18,20 +18,20 @@
 > Требуется сборка OrcaSlicer с поддержкой Python Plugins, Pages и Printer Agents (при отсутствии меню `File -> Plugins` используйте актуальную Nightly / compatible сборку).
 
 1. Откройте `File -> Plugins -> Browse plugins`.
-2. Найдите **AnySharik Cloud** и установите плагин.
-3. В списке плагинов включите пакет **AnySharik Cloud**.
-4. Раскройте пакет и включите capability **`AnySharik Cloud printer agent`**.
+2. Найдите **AnySharik** и установите плагин.
+3. В списке плагинов включите пакет **AnySharik**.
+4. Раскройте пакет и включите capability **`AnySharik printer agent`**.
 5. Перезапустите OrcaSlicer.
 
 При первом запуске подтвердите запрошенные плагином разрешения (доступ к `cloud-universe.anycubic.com`, `amazonaws.com`, `mqtt-universe.anycubic.com`, локальному порту входа `19223`, запуску Edge/Chrome для входа и чтению/записи каталога плагина).
 
 ## Подключение аккаунта и настройка принтера
 
-1. Откройте вкладку **AnySharik Cloud** и нажмите **Sign in**.
+1. Откройте вкладку **AnySharik** и нажмите **Sign in**.
 2. Завершите вход в открывшемся официальном окне Anycubic Cloud (включая CAPTCHA / 2FA, если требуется). Для входа нужен Microsoft Edge, Google Chrome или совместимый Chromium.
 3. Выберите принтер из списка в левой панели.
 4. Откройте профиль принтера в OrcaSlicer: `Basic information -> Advanced`.
-5. В поле **Printer Agent** / **Сетевой агент** выберите **`AnySharik Cloud printer agent`** (ID: `anysharik_cloud`).
+5. В поле **Printer Agent** / **Сетевой агент** выберите **`AnySharik printer agent`** (ID: `anysharik_cloud`).
 6. В общих настройках OrcaSlicer включите **`Use printer agents instead of print hosts`** и перезапустите OrcaSlicer.
 
 ## Текущие ограничения Cloud API

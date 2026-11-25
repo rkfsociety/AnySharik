@@ -3,8 +3,8 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "anysharik-cloud"
-version = "0.3.17"
+name = "AnySharik"
+version = "0.3.18"
 description = "Anycubic Cloud integration for OrcaSlicer"
 requires-python = ">=3.9"
 
