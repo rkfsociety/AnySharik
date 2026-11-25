@@ -1,12 +1,6 @@
 name: Publish to OrcaCloud
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "anysharik_cloud/pyproject.toml"
-      - "anysharik_cloud/anysharik_cloud/plugin.py"
   release:
     types: [published]
 
@@ -23,103 +17,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Detect and validate version
-        id: version
+      - name: Validate release version
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import os
-          import re
-          import subprocess
-          import tomllib
-          from pathlib import Path
-
-          def parse_semver(v: str) -> tuple[int, int, int]:
-              if not re.fullmatch(r"\d+\.\d+\.\d+", v):
-                  raise SystemExit(f"Version must be MAJOR.MINOR.PATCH (got: {v!r})")
-              return tuple(int(part) for part in v.split("."))
-
-          with open("anysharik_cloud/pyproject.toml", "rb") as f:
-              project_version = tomllib.load(f)["project"]["version"]
-
-          plugin_text = Path("anysharik_cloud/anysharik_cloud/plugin.py").read_text(encoding="utf-8")
-          header_match = re.search(r'^# version = "([^"]+)"$', plugin_text, re.MULTILINE)
-          if not header_match:
-              raise SystemExit("Could not find '# version = \"...\"' in plugin.py")
-          plugin_version = header_match.group(1)
-
-          parse_semver(project_version)
-          if project_version != plugin_version:
-              raise SystemExit(f"Version mismatch: pyproject={project_version}, plugin.py={plugin_version}")
-
-          event_name = os.environ["GITHUB_EVENT_NAME"]
-          should_publish = False
-
-          if event_name == "release":
-              tag_version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
-              parse_semver(tag_version)
-              if tag_version != project_version:
-                  raise SystemExit(
-                      f"Version mismatch: tag={tag_version}, pyproject={project_version}, plugin.py={plugin_version}"
-                  )
-              should_publish = True
-          elif event_name == "push":
-              before = os.environ.get("GITHUB_EVENT_BEFORE", "")
-              if not before or set(before) == {"0"}:
-                  should_publish = True
-              else:
-                  prev_raw = subprocess.run(
-                      ["git", "show", f"{before}:anysharik_cloud/pyproject.toml"],
-                      capture_output=True,
-                      text=True,
-                  )
-                  if prev_raw.returncode != 0:
-                      should_publish = True
-                  else:
-                      prev_version = tomllib.loads(prev_raw.stdout)["project"]["version"]
-                      should_publish = parse_semver(project_version) > parse_semver(prev_version)
-                      print(f"Previous version: {prev_version}, current version: {project_version}")
-
-          print(f"should_publish={str(should_publish).lower()}")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
-              out.write(f"should_publish={str(should_publish).lower()}\n")
-              out.write(f"version={project_version}\n")
-
-          if should_publish:
-              import json
-
-              event_path = os.environ.get("GITHUB_EVENT_PATH", "")
-              event = json.loads(Path(event_path).read_text(encoding="utf-8")) if event_path else {}
-              if event_name == "release":
-                  notes = (event.get("release") or {}).get("body") or ""
-              else:
-                  raw_msg = ((event.get("head_commit") or {}).get("message") or "").strip()
-                  if "\n\n" in raw_msg:
-                      notes = raw_msg.split("\n\n", 1)[1].strip()
-                  else:
-                      notes = raw_msg
-              notes = notes[:4000]
-              Path(os.environ["RUNNER_TEMP"], "release_notes.txt").write_text(notes, encoding="utf-8")
-          PY
-        env:
-          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          version="${GITHUB_REF_NAME#v}"
+          project_version="$(python -c 'import tomllib; print(tomllib.load(open("anysharik_cloud/pyproject.toml", "rb"))["project"]["version"])')"
+          plugin_version="$(sed -n 's/^# version = "\([^"]*\)"$/\1/p' anysharik_cloud/anysharik_cloud/plugin.py | head -n 1)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must be vMAJOR.MINOR.PATCH (got: $GITHUB_REF_NAME)" >&2
+            exit 1
+          fi
+          if [[ "$version" != "$project_version" || "$version" != "$plugin_version" ]]; then
+            echo "Version mismatch: tag=$version, pyproject=$project_version, plugin.py=$plugin_version" >&2
+            exit 1
+          fi
 
       - name: Build universal plugin wheel
-        if: steps.version.outputs.should_publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
           python -m pip wheel ./anysharik_cloud --no-deps --wheel-dir ./anysharik_cloud/dist
           python - <<'PY'
-          import sys
           import zipfile
           from pathlib import Path
 
@@ -129,19 +53,17 @@ jobs:
               raise SystemExit(f"Expected one wheel, found {len(wheels)}")
 
           source = wheels[0]
-          target = source
-          temporary = target.with_suffix(".whl.tmp")
+          temporary = source.with_suffix(".whl.tmp")
           with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(temporary, "w") as dst:
               for info in src.infolist():
                   data = src.read(info.filename)
                   if info.filename.endswith(".dist-info/METADATA"):
                       data = data.replace(b"\r\n", b"\n")
                   dst.writestr(info, data)
-          temporary.replace(target)
+          temporary.replace(source)
           PY
 
       - name: Publish release to OrcaCloud
-        if: steps.version.outputs.should_publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -152,9 +74,8 @@ jobs:
             exit 1
           fi
 
-          version="${{ steps.version.outputs.version }}"
-          notes_file="${RUNNER_TEMP}/release_notes.txt"
-          changelog="$(cat "$notes_file" 2>/dev/null || true)"
+          version="${GITHUB_REF_NAME#v}"
+          changelog="$(python -c 'import json, os; e = json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8")); print(((e.get("release") or {}).get("body") or "")[:4000], end="")')"
           metadata="$(jq -cn --arg version "$version" --arg changelog "$changelog" \
             '{version: $version} + (if $changelog == "" then {} else {changelog: $changelog} end)')"
           args=(-F "metadata=$metadata")
@@ -178,34 +99,17 @@ jobs:
           fi
           jq -c --arg status "$status" '{status: $status, version, level: .security.level}' response.json
 
-      - name: Create GitHub release and clean up old tags/releases
-        if: github.event_name == 'push' && steps.version.outputs.should_publish == 'true'
+      - name: Attach wheel to GitHub release and clean up old tags/releases
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          version="${{ steps.version.outputs.version }}"
-          tag="v${version}"
-          notes_file="${RUNNER_TEMP}/release_notes.txt"
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release delete "$tag" --yes
-          fi
-          git push origin --delete "$tag" >/dev/null 2>&1 || true
-
+          tag="${GITHUB_REF_NAME}"
           shopt -s nullglob
           wheels=($PLUGIN_FILES)
-          if [[ -s "$notes_file" ]]; then
-            gh release create "$tag" "${wheels[@]}" \
-              --target "$GITHUB_SHA" \
-              --title "$tag" \
-              --notes-file "$notes_file"
-          else
-            gh release create "$tag" "${wheels[@]}" \
-              --target "$GITHUB_SHA" \
-              --title "$tag" \
-              --notes "Release ${tag}"
+          if [[ "${#wheels[@]}" -gt 0 ]]; then
+            gh release upload "$tag" "${wheels[@]}" --clobber
           fi
 
           while IFS= read -r old_tag; do

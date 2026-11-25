@@ -1,0 +1,134 @@
+name: Auto Release on Version Bump
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "anysharik_cloud/pyproject.toml"
+      - "anysharik_cloud/anysharik_cloud/plugin.py"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Detect version bump and extract notes
+        id: version
+        shell: bash
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          def parse_semver(v: str) -> tuple[int, int, int]:
+              if not re.fullmatch(r"\d+\.\d+\.\d+", v):
+                  raise SystemExit(f"Version must be MAJOR.MINOR.PATCH (got: {v!r})")
+              return tuple(int(part) for part in v.split("."))
+
+          with open("anysharik_cloud/pyproject.toml", "rb") as f:
+              project_version = tomllib.load(f)["project"]["version"]
+
+          plugin_text = Path("anysharik_cloud/anysharik_cloud/plugin.py").read_text(encoding="utf-8")
+          header_match = re.search(r'^# version = "([^"]+)"$', plugin_text, re.MULTILINE)
+          if not header_match:
+              raise SystemExit("Could not find '# version = \"...\"' in plugin.py")
+          plugin_version = header_match.group(1)
+
+          parse_semver(project_version)
+          if project_version != plugin_version:
+              raise SystemExit(f"Version mismatch: pyproject={project_version}, plugin.py={plugin_version}")
+
+          before = os.environ.get("GITHUB_EVENT_BEFORE", "")
+          should_release = False
+          if not before or set(before) == {"0"}:
+              should_release = True
+          else:
+              prev_raw = subprocess.run(
+                  ["git", "show", f"{before}:anysharik_cloud/pyproject.toml"],
+                  capture_output=True,
+                  text=True,
+              )
+              if prev_raw.returncode != 0:
+                  should_release = True
+              else:
+                  prev_version = tomllib.loads(prev_raw.stdout)["project"]["version"]
+                  should_release = parse_semver(project_version) > parse_semver(prev_version)
+                  print(f"Previous version: {prev_version}, current version: {project_version}")
+
+          if should_release:
+              event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+              event = json.loads(Path(event_path).read_text(encoding="utf-8")) if event_path else {}
+              raw_msg = ((event.get("head_commit") or {}).get("message") or "").strip()
+              if "\n\n" in raw_msg:
+                  notes = raw_msg.split("\n\n", 1)[1].strip()
+              else:
+                  notes = raw_msg
+              Path(os.environ["RUNNER_TEMP"], "release_notes.txt").write_text(notes[:4000], encoding="utf-8")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"should_release={str(should_release).lower()}\n")
+              out.write(f"version={project_version}\n")
+          PY
+
+      - name: Create GitHub release and clean up old tags/releases
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$HAS_RELEASE_TOKEN" != "true" ]]; then
+            echo "::warning::RELEASE_TOKEN secret is not set; release created with GITHUB_TOKEN will not trigger publish-orcacloud.yml automatically."
+          fi
+
+          version="${{ steps.version.outputs.version }}"
+          tag="v${version}"
+          notes_file="${RUNNER_TEMP}/release_notes.txt"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release delete "$tag" --yes
+          fi
+          git push origin --delete "$tag" >/dev/null 2>&1 || true
+
+          if [[ -s "$notes_file" ]]; then
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes-file "$notes_file"
+          else
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes "Release ${tag}"
+          fi
+
+          while IFS= read -r old_tag; do
+            if [[ -n "$old_tag" && "$old_tag" != "$tag" ]]; then
+              gh release delete "$old_tag" --yes --cleanup-tag || true
+            fi
+          done < <(gh release list --limit 100 --json tagName -q '.[].tagName')
+
+          while IFS= read -r old_tag; do
+            if [[ -n "$old_tag" && "$old_tag" != "$tag" ]]; then
+              git push origin --delete "$old_tag" || true
+            fi
+          done < <(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | grep -v '\^{}$')
