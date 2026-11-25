@@ -1,0 +1,103 @@
+name: Publish to OrcaCloud
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PLUGIN_FILES: "anysharik_cloud/dist/anysharik-*-py3-none-any.whl"
+  PUBLISH_URL: "https://api.orcaslicer.com/api/v1/plugin-publish/plugins/37750ef7-1b80-4137-9492-c8b34521f2ef/releases"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          project_version="$(python -c 'import tomllib; print(tomllib.load(open("anysharik_cloud/pyproject.toml", "rb"))["project"]["version"])')"
+          plugin_version="$(sed -n 's/^# version = "\([^"]*\)"$/\1/p' anysharik_cloud/anysharik_cloud/plugin.py | head -n 1)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must be vMAJOR.MINOR.PATCH (got: $GITHUB_REF_NAME)" >&2
+            exit 1
+          fi
+          if [[ "$version" != "$project_version" || "$version" != "$plugin_version" ]]; then
+            echo "Version mismatch: tag=$version, pyproject=$project_version, plugin.py=$plugin_version" >&2
+            exit 1
+          fi
+
+      - name: Build universal plugin wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip wheel ./anysharik_cloud --no-deps --wheel-dir ./anysharik_cloud/dist
+          version="${GITHUB_REF_NAME#v}"
+          python - "$version" <<'PY'
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          dist = Path("anysharik_cloud/dist")
+          wheels = list(dist.glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"Expected one wheel, found {len(wheels)}")
+
+          source = wheels[0]
+          target = source
+          temporary = target.with_suffix(".whl.tmp")
+          with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(temporary, "w") as dst:
+              for info in src.infolist():
+                  data = src.read(info.filename)
+                  if info.filename.endswith(".dist-info/METADATA"):
+                      data = data.replace(b"\r\n", b"\n")
+                  dst.writestr(info, data)
+          temporary.replace(target)
+          PY
+
+      - name: Publish release to OrcaCloud
+        shell: bash
+        run: |
+          set -euo pipefail
+          oidc_token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=orcacloud" | jq -r .value)"
+          if [[ -z "$oidc_token" || "$oidc_token" == "null" ]]; then
+            echo "GitHub did not provide an OrcaCloud OIDC token" >&2
+            exit 1
+          fi
+
+          version="${GITHUB_REF_NAME#v}"
+          changelog="$(jq -r '.release.body // ""' "$GITHUB_EVENT_PATH" | head -c 4000)"
+          metadata="$(jq -cn --arg version "$version" --arg changelog "$changelog" \
+            '{version: $version} + (if $changelog == "" then {} else {changelog: $changelog} end)')"
+          args=(-F "metadata=$metadata")
+          shopt -s nullglob
+          for file in $PLUGIN_FILES; do
+            args+=(-F "files=@$file")
+          done
+          if [[ "${#args[@]}" -eq 1 ]]; then
+            echo "No plugin files matched: $PLUGIN_FILES" >&2
+            exit 1
+          fi
+
+          status="$(curl -sS -o response.json -w '%{http_code}' \
+            -H "Authorization: Bearer $oidc_token" \
+            "${args[@]}" \
+            "$PUBLISH_URL")"
+          if [[ "$status" != "201" ]]; then
+            echo "OrcaCloud publish failed with HTTP $status" >&2
+            jq -c '.error // .' response.json >&2 || true
+            exit 1
+          fi
+          jq -c --arg status "$status" '{status: $status, version, level: .security.level}' response.json

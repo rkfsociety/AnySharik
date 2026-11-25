@@ -18,6 +18,8 @@
 3. Откройте вкладку **AnySharik**, нажмите **Sign in** и войдите на официальной странице Anycubic Cloud (требуется Microsoft Edge, Google Chrome или совместимый Chromium).
 4. В профиле принтера (`Basic information -> Advanced`) выберите **Printer Agent**: **`AnySharik printer agent`** (ID: `anysharik_cloud`) и перезапустите OrcaSlicer.
 
+Принтеры Anycubic Cloud появляются в штатном списке OrcaSlicer. В диалоге **«Начать печать»** выберите нужный принтер в поле **«Выбор принтера»**, настройте параметры печати и нажмите **«Начать печать»**. Отдельное окно AnySharik не открывается.
+
 ## Ограничения
 
 - Поддерживаются печать, `Pause`, `Resume`, `Stop` и чтение телеметрии/температур/`ACE Pro`/внешней катушки.

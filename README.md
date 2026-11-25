@@ -33,6 +33,7 @@
 4. Откройте профиль принтера в OrcaSlicer: `Basic information -> Advanced`.
 5. В поле **Printer Agent** / **Сетевой агент** выберите **`AnySharik printer agent`** (ID: `anysharik_cloud`).
 6. В общих настройках OrcaSlicer включите **`Use printer agents instead of print hosts`** и перезапустите OrcaSlicer.
+7. После нарезки нажмите отправку на печать и в штатном окне **«Начать печать»** выберите принтер Anycubic Cloud из списка **«Выбор принтера»**.
 
 ## Текущие ограничения Cloud API
 

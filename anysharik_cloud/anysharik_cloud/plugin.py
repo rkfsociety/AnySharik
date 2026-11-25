@@ -7,7 +7,7 @@
 # name = "AnySharik"
 # description = "Anycubic Cloud printer control, printing and telemetry"
 # author = "AnySharik"
-# version = "0.3.18"
+# version = "0.3.22"
 # ///
 from __future__ import annotations
 
@@ -2859,7 +2859,7 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
         return "AnySharik printer agent"
 
     def get_agent_info(self):
-        return orca.printer_agent.AgentInfo(AGENT_ID, "AnySharik", "0.3.18", "Anycubic Cloud")
+        return orca.printer_agent.AgentInfo(AGENT_ID, "AnySharik", "0.3.22", "Anycubic Cloud")
 
     def _cb(self, name, fn):
         self.callbacks[name] = fn
@@ -2889,6 +2889,11 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
             self.refresh()
         except CloudError:
             return -1
+        try:
+            if getattr(params, "dev_id", ""):
+                self.select(int(params.dev_id))
+        except (TypeError, ValueError):
+            pass
         return 0 if self.printers else -1
 
     def disconnect_printer(self):
@@ -2901,7 +2906,13 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
         return str(self.selected)
 
     def set_user_selected_machine(self, dev_id):
-        self.selected = int(dev_id or 0)
+        try:
+            self.selected = int(dev_id or 0)
+        except (TypeError, ValueError):
+            self.selected = 0
+        state = load_state()
+        state["printer_id"] = self.selected
+        save_state(state)
         return 0
 
     def check_cert(self): return 0
@@ -2922,7 +2933,7 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
                 fn(json.dumps({
                     "dev_name": p.get("name", "Anycubic"),
                     "dev_id": str(p.get("id", 0)),
-                    "dev_ip": "cloud",
+                    "dev_ip": "",
                     "connect_type": "cloud",
                     "bind_state": "free",
                 }))
@@ -3047,15 +3058,24 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
             if page:
                 page.post_message({"message": str(exc), "error": True})
 
-    def start_local_print(self, params, update_fn, cancel_fn):
+    def _send_print(self, params, update_fn, cancel_fn):
         state = load_state()
-        pid = state.get("printer_id") or self.selected
-        if not state.get("token") or not pid:
+        if not state.get("token"):
             return -7002
+        try:
+            printer_id = int(getattr(params, "dev_id", "") or 0)
+        except (TypeError, ValueError):
+            printer_id = 0
+        if not printer_id:
+            printer_id = int(state.get("printer_id") or self.selected or 0)
+        if not printer_id:
+            return -7002
+        if printer_id != self.selected:
+            self.select(printer_id)
         path, tmp = extract_gcode(params.filename, getattr(params, "plate_index", 0))
         try:
             CloudApi(state["token"]).upload_and_print(
-                pid,
+                printer_id,
                 path,
                 True,
                 lambda p, m: update_fn(1, p, m) if update_fn else None,
@@ -3070,17 +3090,22 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
                 except OSError:
                     pass
 
+    def start_local_print(self, params, update_fn, cancel_fn):
+        return self._send_print(params, update_fn, cancel_fn)
+
     def start_local_print_with_record(self, params, update_fn, cancel_fn, wait_fn):
-        return self.start_local_print(params, update_fn, cancel_fn)
+        # Force OrcaSlicer onto its cloud-print path; otherwise it may make a
+        # speculative LAN attempt and ask for the target printer twice.
+        return -7010
 
     def start_send_gcode_to_sdcard(self, params, update_fn, cancel_fn, wait_fn):
         return -7010
 
     def start_print(self, params, update_fn, cancel_fn, wait_fn):
-        return self.start_local_print(params, update_fn, cancel_fn)
+        return self._send_print(params, update_fn, cancel_fn)
 
     def start_sdcard_print(self, params, update_fn, cancel_fn):
-        return self.start_local_print(params, update_fn, cancel_fn)
+        return self._send_print(params, update_fn, cancel_fn)
 
     def send_message(self, *args): return 0
     def send_message_to_printer(self, *args): return 0
