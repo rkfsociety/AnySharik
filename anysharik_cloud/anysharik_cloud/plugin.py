@@ -7,7 +7,7 @@
 # name = "AnySharik"
 # description = "Anycubic Cloud printer control, printing and telemetry"
 # author = "AnySharik"
-# version = "0.3.22"
+# version = "0.3.23"
 # ///
 from __future__ import annotations
 
@@ -2859,7 +2859,7 @@ class CloudAgent(orca.printer_agent.PrinterAgentBase):
         return "AnySharik printer agent"
 
     def get_agent_info(self):
-        return orca.printer_agent.AgentInfo(AGENT_ID, "AnySharik", "0.3.22", "Anycubic Cloud")
+        return orca.printer_agent.AgentInfo(AGENT_ID, "AnySharik", "0.3.23", "Anycubic Cloud")
 
     def _cb(self, name, fn):
         self.callbacks[name] = fn
