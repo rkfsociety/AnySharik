@@ -1,6 +1,12 @@
 name: Publish to OrcaCloud
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "anysharik_cloud/pyproject.toml"
+      - "anysharik_cloud/anysharik_cloud/plugin.py"
   release:
     types: [published]
 
@@ -17,34 +23,86 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Validate release version
+      - name: Detect and validate version
+        id: version
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          project_version="$(python -c 'import tomllib; print(tomllib.load(open("anysharik_cloud/pyproject.toml", "rb"))["project"]["version"])')"
-          plugin_version="$(sed -n 's/^# version = "\([^"]*\)"$/\1/p' anysharik_cloud/anysharik_cloud/plugin.py | head -n 1)"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tag must be vMAJOR.MINOR.PATCH (got: $GITHUB_REF_NAME)" >&2
-            exit 1
-          fi
-          if [[ "$version" != "$project_version" || "$version" != "$plugin_version" ]]; then
-            echo "Version mismatch: tag=$version, pyproject=$project_version, plugin.py=$plugin_version" >&2
-            exit 1
-          fi
+          python - <<'PY'
+          import os
+          import re
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          def parse_semver(v: str) -> tuple[int, int, int]:
+              if not re.fullmatch(r"\d+\.\d+\.\d+", v):
+                  raise SystemExit(f"Version must be MAJOR.MINOR.PATCH (got: {v!r})")
+              return tuple(int(part) for part in v.split("."))
+
+          with open("anysharik_cloud/pyproject.toml", "rb") as f:
+              project_version = tomllib.load(f)["project"]["version"]
+
+          plugin_text = Path("anysharik_cloud/anysharik_cloud/plugin.py").read_text(encoding="utf-8")
+          header_match = re.search(r'^# version = "([^"]+)"$', plugin_text, re.MULTILINE)
+          if not header_match:
+              raise SystemExit("Could not find '# version = \"...\"' in plugin.py")
+          plugin_version = header_match.group(1)
+
+          parse_semver(project_version)
+          if project_version != plugin_version:
+              raise SystemExit(f"Version mismatch: pyproject={project_version}, plugin.py={plugin_version}")
+
+          event_name = os.environ["GITHUB_EVENT_NAME"]
+          should_publish = False
+
+          if event_name == "release":
+              tag_version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+              parse_semver(tag_version)
+              if tag_version != project_version:
+                  raise SystemExit(
+                      f"Version mismatch: tag={tag_version}, pyproject={project_version}, plugin.py={plugin_version}"
+                  )
+              should_publish = True
+          elif event_name == "push":
+              before = os.environ.get("GITHUB_EVENT_BEFORE", "")
+              if not before or set(before) == {"0"}:
+                  should_publish = True
+              else:
+                  prev_raw = subprocess.run(
+                      ["git", "show", f"{before}:anysharik_cloud/pyproject.toml"],
+                      capture_output=True,
+                      text=True,
+                  )
+                  if prev_raw.returncode != 0:
+                      should_publish = True
+                  else:
+                      prev_version = tomllib.loads(prev_raw.stdout)["project"]["version"]
+                      should_publish = parse_semver(project_version) > parse_semver(prev_version)
+                      print(f"Previous version: {prev_version}, current version: {project_version}")
+
+          print(f"should_publish={str(should_publish).lower()}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"should_publish={str(should_publish).lower()}\n")
+              out.write(f"version={project_version}\n")
+          PY
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
 
       - name: Build universal plugin wheel
+        if: steps.version.outputs.should_publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
           python -m pip wheel ./anysharik_cloud --no-deps --wheel-dir ./anysharik_cloud/dist
-          version="${GITHUB_REF_NAME#v}"
-          python - "$version" <<'PY'
+          python - <<'PY'
           import sys
           import zipfile
           from pathlib import Path
@@ -67,6 +125,7 @@ jobs:
           PY
 
       - name: Publish release to OrcaCloud
+        if: steps.version.outputs.should_publish == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -77,8 +136,8 @@ jobs:
             exit 1
           fi
 
-          version="${GITHUB_REF_NAME#v}"
-          changelog="$(jq -r '.release.body // ""' "$GITHUB_EVENT_PATH" | head -c 4000)"
+          version="${{ steps.version.outputs.version }}"
+          changelog="$(jq -r '.release.body // .head_commit.message // ""' "$GITHUB_EVENT_PATH" | head -c 4000)"
           metadata="$(jq -cn --arg version "$version" --arg changelog "$changelog" \
             '{version: $version} + (if $changelog == "" then {} else {changelog: $changelog} end)')"
           args=(-F "metadata=$metadata")
